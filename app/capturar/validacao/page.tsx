@@ -1,283 +1,137 @@
-"use client"
+'use client';
 
-import { motion } from "framer-motion"
-import { 
-  ArrowLeft, 
-  Check, 
-  CreditCard, 
-  Banknote,
-  ChevronDown,
-  Loader2
-} from "lucide-react"
-import Link from "next/link"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
+import { useState, useRef } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
-const departments = [
-  "Arte",
-  "Figurino",
-  "Fotografia",
-  "Produção",
-  "Som",
-  "Elétrica",
-  "Maquinária",
-  "Alimentação"
-]
+// Inicializando o Supabase com as chaves públicas
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function ValidacaoPage() {
-  const [valor, setValor] = useState("2.450,00")
-  const [data, setData] = useState("25/05/2026")
-  const [fornecedor, setFornecedor] = useState("Casa do Artista")
-  const [departamento, setDepartamento] = useState("Arte")
-  const [pagamento, setPagamento] = useState<"cartao" | "dinheiro">("cartao")
-  const [showDeptDropdown, setShowDeptDropdown] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const router = useRouter()
-  const supabase = createClient()
+  const [loading, setLoading] = useState(false);
+  const [mensagem, setMensagem] = useState('');
+  const [valor, setValor] = useState('');
+  const [fornecedor, setFornecedor] = useState('');
+  
+  // Referência invisível para a câmera
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleConfirm = async () => {
-    setIsLoading(true)
-    setError(null)
+  const abrirCamera = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleCapturaEUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    setMensagem('📸 Enviando foto para a nuvem...');
 
     try {
-      console.log("[v0] Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL)
+      // 1. Criar um nome único para o arquivo
+      const fileExt = file.name.split('.').pop() || 'jpg';
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+      // 2. Upload para o Storage (bucket: comprovantes_nf)
+      const { error: uploadError } = await supabase.storage
+        .from('comprovantes_nf')
+        .upload(fileName, file);
+
+      if (uploadError) throw uploadError;
+
+      // 3. Pegar a URL pública da foto
+      const { data: publicUrlData } = supabase.storage
+        .from('comprovantes_nf')
+        .getPublicUrl(fileName);
       
-      // Converter valor de string BR para número
-      const valorNumerico = parseFloat(valor.replace(/\./g, '').replace(',', '.'))
+      const fotoUrl = publicUrlData.publicUrl;
+      setMensagem('✅ Foto salva! Gravando dados da nota...');
 
-      // Converter data de DD/MM/YYYY para YYYY-MM-DD
-      const [dia, mes, ano] = data.split('/')
-      const dataFormatada = `${ano}-${mes}-${dia}`
-
-      // Inserir na tabela notas_fiscais
-      const { error: insertError } = await supabase
+      // 4. Salvar tudo no Banco de Dados
+      const { error: dbError } = await supabase
         .from('notas_fiscais')
-        .insert([{
-          valor: valorNumerico,
-          data_emissao: dataFormatada,
-          fornecedor: fornecedor,
-          departamento: departamento,
-          forma_pagamento: pagamento,
-          status: 'pendente'
-        }])
+        .insert([
+          { 
+            valor_total: valor || '0', 
+            fornecedor: fornecedor || 'Não informado',
+            foto_url: fotoUrl, // A mágica acontece aqui!
+            data_emissao: new Date().toISOString()
+          }
+        ]);
 
-      if (insertError) {
-        setError(`Erro ao salvar: ${insertError.message}`)
-        setIsLoading(false)
-        return
-      }
+      if (dbError) throw dbError;
 
-      router.push("/capturar/sucesso")
-    } catch (err) {
-      setError("Erro inesperado ao salvar os dados")
-      setIsLoading(false)
+      setMensagem('🚀 Sucesso! Nota e foto salvas perfeitamente.');
+      setValor('');
+      setFornecedor('');
+
+    } catch (error: any) {
+      setMensagem(`❌ Erro: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <div className="min-h-screen bg-[#0E0E0E] flex flex-col">
-      {/* Header */}
-      <motion.header
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="h-14 px-4 flex items-center gap-4"
-      >
-        <Link href="/painel">
-          <button className="p-2 rounded-full hover:bg-[#1C1B1B] transition-colors">
-            <ArrowLeft className="w-5 h-5 text-white" />
-          </button>
-        </Link>
-        <span className="font-[var(--font-bebas-neue)] text-lg tracking-[0.15em] text-white">
-          VALIDAÇÃO
-        </span>
-      </motion.header>
+    <div className="min-h-screen bg-black text-gray-200 p-6 font-sans">
+      <div className="max-w-md mx-auto space-y-8 mt-10">
+        
+        <div>
+          <h1 className="text-2xl font-light tracking-widest text-white mb-2">VALIDAÇÃO</h1>
+          <p className="text-sm text-gray-500">Capture a nota fiscal do set.</p>
+        </div>
 
-      {/* Content */}
-      <div className="flex-1 px-4 pb-4 flex flex-col">
-        {/* Preview Card */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-6"
-        >
-          <div className="p-4 bg-[#131313] border border-[#1C1B1B] rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full bg-success" />
-              <span className="text-xs text-success uppercase tracking-wider font-mono">
-                Dados Extraídos
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Verifique e edite os dados detectados automaticamente.
-            </p>
+        {mensagem && (
+          <div className="p-4 rounded-md bg-gray-900 border border-gray-800 text-sm">
+            {mensagem}
           </div>
-        </motion.div>
-
-        {/* Error Message */}
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg"
-          >
-            <p className="text-sm text-red-400">{error}</p>
-          </motion.div>
         )}
 
-        {/* Form Fields */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="space-y-4 flex-1"
-        >
-          {/* Valor */}
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground uppercase tracking-wider">
-              Valor Total
-            </label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-mono">
-                R$
-              </span>
-              <input
-                type="text"
-                value={valor}
-                onChange={(e) => setValor(e.target.value)}
-                disabled={isLoading}
-                className="w-full pl-12 pr-4 py-3 bg-[#131313] border border-[#1C1B1B] rounded-lg text-white font-mono text-lg focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
-              />
-            </div>
-          </div>
-
-          {/* Data */}
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground uppercase tracking-wider">
-              Data de Emissão
-            </label>
-            <input
-              type="text"
-              value={data}
-              onChange={(e) => setData(e.target.value)}
-              disabled={isLoading}
-              className="w-full px-4 py-3 bg-[#131313] border border-[#1C1B1B] rounded-lg text-white font-mono focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
-            />
-          </div>
-
-          {/* Fornecedor */}
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground uppercase tracking-wider">
-              Fornecedor
-            </label>
-            <input
-              type="text"
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold tracking-wider text-gray-500 mb-2">FORNECEDOR</label>
+            <input 
+              type="text" 
               value={fornecedor}
               onChange={(e) => setFornecedor(e.target.value)}
-              disabled={isLoading}
-              className="w-full px-4 py-3 bg-[#131313] border border-[#1C1B1B] rounded-lg text-white focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+              className="w-full bg-gray-950 border border-gray-800 rounded-lg p-4 text-white focus:outline-none focus:border-purple-500 transition-colors"
+              placeholder="Ex: Padaria do Set"
             />
           </div>
 
-          {/* Departamento */}
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground uppercase tracking-wider">
-              Departamento
-            </label>
-            <div className="relative">
-              <button
-                onClick={() => !isLoading && setShowDeptDropdown(!showDeptDropdown)}
-                disabled={isLoading}
-                className="w-full px-4 py-3 bg-[#131313] border border-[#1C1B1B] rounded-lg text-white text-left flex items-center justify-between focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
-              >
-                {departamento}
-                <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${showDeptDropdown ? "rotate-180" : ""}`} />
-              </button>
-              
-              {showDeptDropdown && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="absolute top-full left-0 right-0 mt-1 bg-[#131313] border border-[#1C1B1B] rounded-lg overflow-hidden z-10"
-                >
-                  {departments.map((dept) => (
-                    <button
-                      key={dept}
-                      onClick={() => {
-                        setDepartamento(dept)
-                        setShowDeptDropdown(false)
-                      }}
-                      className={`w-full px-4 py-2.5 text-left text-sm hover:bg-[#1C1B1B] transition-colors ${
-                        dept === departamento ? "text-primary bg-primary/10" : "text-white"
-                      }`}
-                    >
-                      {dept}
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </div>
+          <div>
+            <label className="block text-xs font-semibold tracking-wider text-gray-500 mb-2">VALOR TOTAL</label>
+            <input 
+              type="number" 
+              value={valor}
+              onChange={(e) => setValor(e.target.value)}
+              className="w-full bg-gray-950 border border-gray-800 rounded-lg p-4 text-white focus:outline-none focus:border-purple-500 transition-colors"
+              placeholder="R$ 0,00"
+            />
           </div>
+        </div>
 
-          {/* Forma de Pagamento */}
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground uppercase tracking-wider">
-              Forma de Pagamento
-            </label>
-            <div className="flex gap-3">
-              <button
-                onClick={() => !isLoading && setPagamento("cartao")}
-                disabled={isLoading}
-                className={`flex-1 p-3 rounded-lg border flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${
-                  pagamento === "cartao"
-                    ? "bg-primary/10 border-primary text-white"
-                    : "bg-[#131313] border-[#1C1B1B] text-muted-foreground hover:border-primary/50"
-                }`}
-              >
-                <CreditCard className="w-4 h-4" />
-                <span className="text-sm">Cartão</span>
-              </button>
-              <button
-                onClick={() => !isLoading && setPagamento("dinheiro")}
-                disabled={isLoading}
-                className={`flex-1 p-3 rounded-lg border flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${
-                  pagamento === "dinheiro"
-                    ? "bg-primary/10 border-primary text-white"
-                    : "bg-[#131313] border-[#1C1B1B] text-muted-foreground hover:border-primary/50"
-                }`}
-              >
-                <Banknote className="w-4 h-4" />
-                <span className="text-sm">Dinheiro</span>
-              </button>
-            </div>
-          </div>
-        </motion.div>
+        {/* O input invisível que chama a câmera */}
+        <input 
+          type="file" 
+          accept="image/*" 
+          capture="environment" 
+          ref={fileInputRef}
+          onChange={handleCapturaEUpload}
+          className="hidden"
+        />
 
-        {/* Confirm Button */}
-        <motion.button
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          whileHover={{ scale: isLoading ? 1 : 1.02 }}
-          whileTap={{ scale: isLoading ? 1 : 0.98 }}
-          onClick={handleConfirm}
-          disabled={isLoading}
-          className="w-full py-4 px-6 bg-primary text-primary-foreground font-semibold rounded-lg text-lg tracking-wide flex items-center justify-center gap-2 mt-6 disabled:opacity-50"
+        {/* O botão estiloso que o usuário clica */}
+        <button 
+          onClick={abrirCamera}
+          disabled={loading}
+          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-4 rounded-lg transition-all active:scale-95 disabled:opacity-50"
         >
-          {isLoading ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              SALVANDO...
-            </>
-          ) : (
-            <>
-              <Check className="w-5 h-5" />
-              CONFIRMAR DADOS
-            </>
-          )}
-        </motion.button>
+          {loading ? 'Processando...' : '📷 Fotografar e Salvar'}
+        </button>
+
       </div>
     </div>
-  )
+  );
 }
