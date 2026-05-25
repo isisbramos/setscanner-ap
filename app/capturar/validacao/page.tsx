@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Inicializando o Supabase com as chaves públicas
+// Inicializando o Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -13,13 +13,6 @@ export default function ValidacaoPage() {
   const [mensagem, setMensagem] = useState('');
   const [valor, setValor] = useState('');
   const [fornecedor, setFornecedor] = useState('');
-  
-  // Referência invisível para a câmera
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const abrirCamera = () => {
-    fileInputRef.current?.click();
-  };
 
   const handleCapturaEUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -29,18 +22,15 @@ export default function ValidacaoPage() {
     setMensagem('📸 Enviando foto para a nuvem...');
 
     try {
-      // 1. Criar um nome único para o arquivo
       const fileExt = file.name.split('.').pop() || 'jpg';
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-      // 2. Upload para o Storage (bucket: comprovantes_nf)
       const { error: uploadError } = await supabase.storage
         .from('comprovantes_nf')
         .upload(fileName, file);
 
       if (uploadError) throw uploadError;
 
-      // 3. Pegar a URL pública da foto
       const { data: publicUrlData } = supabase.storage
         .from('comprovantes_nf')
         .getPublicUrl(fileName);
@@ -48,14 +38,13 @@ export default function ValidacaoPage() {
       const fotoUrl = publicUrlData.publicUrl;
       setMensagem('✅ Foto salva! Gravando dados da nota...');
 
-      // 4. Salvar tudo no Banco de Dados
       const { error: dbError } = await supabase
         .from('notas_fiscais')
         .insert([
           { 
             valor_total: valor || '0', 
             fornecedor: fornecedor || 'Não informado',
-            foto_url: fotoUrl, // A mágica acontece aqui!
+            foto_url: fotoUrl,
             data_emissao: new Date().toISOString()
           }
         ]);
@@ -112,24 +101,20 @@ export default function ValidacaoPage() {
           </div>
         </div>
 
-        {/* O input invisível que chama a câmera */}
-        <input 
-          type="file" 
-          accept="image/*" 
-          capture="environment" 
-          ref={fileInputRef}
-          onChange={handleCapturaEUpload}
-          className="hidden"
-        />
-
-        {/* O botão estiloso que o usuário clica */}
-        <button 
-          onClick={abrirCamera}
-          disabled={loading}
-          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-4 rounded-lg transition-all active:scale-95 disabled:opacity-50"
+        {/* O TRUQUE DE MESTRE: A Label vira o botão nativo */}
+        <label 
+          className={`flex items-center justify-center w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-4 rounded-lg transition-all cursor-pointer select-none active:scale-95 ${loading ? 'opacity-50 pointer-events-none' : ''}`}
         >
           {loading ? 'Processando...' : '📷 Fotografar e Salvar'}
-        </button>
+          <input 
+            type="file" 
+            accept="image/*" 
+            capture="environment" 
+            onChange={handleCapturaEUpload}
+            className="hidden"
+            disabled={loading}
+          />
+        </label>
 
       </div>
     </div>
